@@ -101,6 +101,14 @@ check_prerequisites() {
 install_dependencies() {
     step "3/9 의존성 설치"
 
+    # universe 저장소 활성화 (libvdpau1, ocl-icd-libopencl1 등 ffmpeg 의존성)
+    if command -v add-apt-repository >/dev/null 2>&1; then
+        add-apt-repository -y universe 2>/dev/null || true
+    else
+        apt-get install -y -qq software-properties-common 2>/dev/null || true
+        add-apt-repository -y universe 2>/dev/null || true
+    fi
+
     apt-get update -qq
 
     # ffmpeg (MP4 재생)
