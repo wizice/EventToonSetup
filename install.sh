@@ -101,7 +101,18 @@ check_prerequisites() {
 install_dependencies() {
     step "3/9 의존성 설치"
 
-    # universe 저장소 활성화 (libvdpau1, ocl-icd-libopencl1 등 ffmpeg 의존성)
+    # 필수 저장소 활성화 (main restricted universe)
+    local codename
+    codename=$(lsb_release -cs 2>/dev/null || echo "focal")
+    local sources_file="/etc/apt/sources.list"
+
+    # main restricted가 없으면 추가
+    if ! grep -qE "^deb .* ${codename} main" "$sources_file" 2>/dev/null; then
+        echo "deb http://ports.ubuntu.com/ubuntu-ports ${codename} main restricted" >> "$sources_file"
+        log "main restricted 저장소 추가"
+    fi
+
+    # universe 저장소 활성화
     if command -v add-apt-repository >/dev/null 2>&1; then
         add-apt-repository -y universe 2>/dev/null || true
     else
@@ -165,9 +176,13 @@ download_binaries() {
 
     rm -rf "$tmp_dir"
 
-    # 버전 기록
+    # 버전 기록 (--version이 블로킹될 수 있으므로 timeout 사용)
     local ver
-    ver=$("${INSTALL_DIR}/eventtoon-display" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    ver=$(timeout 3 "${INSTALL_DIR}/eventtoon-display" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+    if [ -z "$ver" ]; then
+        # GitHub의 VERSION 파일에서 가져오기
+        ver=$(curl -sSL --max-time 5 "${SETUP_BASE}/VERSION" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    fi
     echo "$ver" > "${SPOOL_DIR}/installed_version"
     log "바이너리 설치 완료 (v$ver)"
 }
@@ -179,6 +194,44 @@ create_directories() {
     mkdir -p "$SPOOL_DIR"/{albums,done,pending}
     mkdir -p "$SCRIPTS_DIR"
     mkdir -p "$LOG_DIR"
+
+    # 기본 config.toml 생성 (없으면) — fetcher가 [push_print] 없이 panic하는 것 방지
+    if [ ! -f "${SPOOL_DIR}/config.toml" ]; then
+        cat > "${SPOOL_DIR}/config.toml" << 'CONFIG'
+# EventToon 설정 파일
+
+[bixolon]
+cups_printer_name = "SLP-DX423"
+label_width = 1200
+label_height = 1800
+density = 14
+speed = 3
+gap = 20
+
+[image_processing]
+gamma = 0.8
+contrast = 1.4
+edge_strength = 1.2
+enable_dithering = true
+enable_edge_enhancement = true
+skip_resize = false
+
+[woosim]
+max_image_width = 384
+command_delay_ms = 150
+image_delay_ms = 400
+max_retry_count = 3
+
+[push_print]
+server_url = "https://smileprint-fcm-api.wizice100.workers.dev/api"
+device_id = "CHANGE_ME"
+location = "CHANGE_ME"
+poll_interval_secs = 1
+cooldown_ms = 500
+CONFIG
+        log "기본 config.toml 생성 (device_id, location 설정 필요)"
+    fi
+
     log "디렉토리 생성 완료"
 }
 
@@ -217,6 +270,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/var/spool/eventtoon
 ExecStart=/usr/local/bin/eventtoon --ipp-port 9999
 Restart=on-failure
 RestartSec=3
@@ -235,6 +289,7 @@ After=eventtoon-fetcher.service time-sync.target network-online.target
 [Service]
 Type=notify
 User=root
+WorkingDirectory=/var/spool/eventtoon
 ExecStartPre=/opt/eventtoon/scripts/auto-update.sh
 ExecStart=/usr/local/bin/eventtoon-display
 ExecStopPost=/opt/eventtoon/scripts/console-toggle.sh on
@@ -256,6 +311,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/var/spool/eventtoon
 ExecStart=/usr/local/bin/eventtoon-fetcher
 Restart=on-failure
 RestartSec=5
@@ -381,9 +437,8 @@ case "$MODE" in
         start_services
 
         # 설치 성공 리포팅
-        local ver
         ver=$(cat "${SPOOL_DIR}/installed_version" 2>/dev/null || echo "unknown")
-        report "success" "완료" "v$ver 설치 성공"
+        report "success" "완료" "v${ver} 설치 성공"
         ;;
 
     *)

@@ -23,15 +23,15 @@ log() {
 
 # 현재 설치된 버전
 get_current_version() {
+    local ver=""
     if [ -f "$VERSION_FILE" ]; then
-        cat "$VERSION_FILE"
+        ver=$(cat "$VERSION_FILE")
+    fi
+    # "unknown"이나 빈 값이면 0.0.0 취급 (업데이트 필요)
+    if [ -z "$ver" ] || [ "$ver" = "unknown" ]; then
+        echo "0.0.0"
     else
-        # 바이너리에서 버전 추출 시도
-        if [ -x "$INSTALL_DIR/eventtoon-display" ]; then
-            "$INSTALL_DIR/eventtoon-display" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0"
-        else
-            echo "0.0.0"
-        fi
+        echo "$ver"
     fi
 }
 
