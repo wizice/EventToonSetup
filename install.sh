@@ -11,7 +11,8 @@
 #
 set -euo pipefail
 
-DEPLOY_BASE="https://fit.wizice.com/api/deploy"
+SETUP_BASE="https://raw.githubusercontent.com/wizice/EventToonSetup/main"
+REPORT_BASE="https://fit.wizice.com/api/device"
 VERSION="${EVENTTOON_VERSION:-latest}"
 INSTALL_DIR="/usr/local/bin"
 SPOOL_DIR="/var/spool/eventtoon"
@@ -38,14 +39,9 @@ NC='\033[0m'
 
 INSTALL_LOG="/var/log/eventtoon-install.log"
 STEP_FILE="/var/spool/eventtoon/.install_step"
-REPORT_URL="${DEPLOY_BASE}/install-report"
+REPORT_URL="${REPORT_BASE}/install-report"
 HOSTNAME_ID=$(hostname 2>/dev/null || echo "unknown")
 mkdir -p "$(dirname "$INSTALL_LOG")" "$(dirname "$STEP_FILE")" 2>/dev/null || true
-
-# 인증 헤더
-auth_header() {
-    echo "Authorization: Bearer ${DEPLOY_TOKEN}"
-}
 
 # 서버에 설치 상태 리포팅 (best effort)
 report() {
@@ -53,9 +49,8 @@ report() {
     local step_name="$2"
     local message="${3:-}"
     curl -sSL --max-time 5 -X POST "$REPORT_URL" \
-        -H "$(auth_header)" \
         -H "Content-Type: application/json" \
-        -d "{\"hostname\":\"$HOSTNAME_ID\",\"status\":\"$status\",\"step\":\"$step_name\",\"message\":\"$message\",\"timestamp\":\"$(date -Iseconds)\"}" \
+        -d "{\"hostname\":\"$HOSTNAME_ID\",\"status\":\"$status\",\"step\":\"$step_name\",\"message\":\"$message\",\"token\":\"$DEPLOY_TOKEN\",\"timestamp\":\"$(date -Iseconds)\"}" \
         >/dev/null 2>&1 || true
 }
 
@@ -92,17 +87,23 @@ check_prerequisites() {
         error "ARM64 전용입니다. 현재: $ARCH"
     fi
 
-    # fit.wizice.com 연결 + 토큰 검증
+    # fit.wizice.com 토큰 검증
     local auth_check
     auth_check=$(curl -sSL --max-time 10 -o /dev/null -w "%{http_code}" \
-        -H "$(auth_header)" "${DEPLOY_BASE}/verify" 2>/dev/null || echo "000")
+        "${REPORT_BASE}/verify?token=${DEPLOY_TOKEN}" 2>/dev/null || echo "000")
     if [ "$auth_check" = "401" ] || [ "$auth_check" = "403" ]; then
         error "인증 실패 — 슈퍼관리자 토큰을 확인하세요."
     elif [ "$auth_check" = "000" ]; then
-        error "서버 연결 실패 — 인터넷 또는 fit.wizice.com 상태를 확인하세요."
+        # 서버 연결 실패해도 GitHub에서 다운로드 가능하므로 경고만
+        warn "fit.wizice.com 연결 실패 — 설치 리포트가 전송되지 않을 수 있습니다."
     fi
 
-    log "사전 확인 완료 (ARM64, root, 인증 OK)"
+    # GitHub 연결 확인
+    if ! curl -sSL --max-time 5 "${SETUP_BASE}/install.sh" -o /dev/null 2>/dev/null; then
+        error "GitHub 연결 실패 — 인터넷 상태를 확인하세요."
+    fi
+
+    log "사전 확인 완료 (ARM64, root, 네트워크 OK)"
 }
 
 # ── 의존성 설치 ──
@@ -134,7 +135,7 @@ install_dependencies() {
 download_binaries() {
     step "4/9 바이너리 다운로드"
 
-    local download_url="${DEPLOY_BASE}/binaries"
+    local download_url="${SETUP_BASE}/binaries"
 
     local bins="eventtoon eventtoon-display eventtoon-fetcher eventtoon-printer eventtoon-player"
     local tmp_dir
@@ -143,9 +144,8 @@ download_binaries() {
     for bin in $bins; do
         log "  다운로드: $bin"
         if curl -sSL --max-time 120 \
-            -H "$(auth_header)" \
             -o "${tmp_dir}/${bin}" \
-            "${download_url}/${bin}-arm64?version=${VERSION}" 2>/dev/null; then
+            "${download_url}/${bin}-arm64" 2>/dev/null; then
             if file "${tmp_dir}/${bin}" | grep -q "ELF.*aarch64"; then
                 chmod +x "${tmp_dir}/${bin}"
             else
@@ -196,7 +196,7 @@ install_scripts() {
         chmod +x "${SCRIPTS_DIR}/${script}" 2>/dev/null || true
     done
 
-    # auto-update.sh도 fit.wizice.com 기반으로 동작하도록 토큰 저장
+    # 설치 리포트용 토큰 저장
     echo "$DEPLOY_TOKEN" > "${SPOOL_DIR}/.deploy_token"
     chmod 600 "${SPOOL_DIR}/.deploy_token"
 

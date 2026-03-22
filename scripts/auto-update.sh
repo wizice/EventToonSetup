@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO="wizice/EventToon"
+SETUP_BASE="https://raw.githubusercontent.com/wizice/EventToonSetup/main"
 INSTALL_DIR="/usr/local/bin"
 BINS="eventtoon eventtoon-display eventtoon-fetcher eventtoon-printer eventtoon-player"
 VERSION_FILE="/var/spool/eventtoon/installed_version"
@@ -35,11 +35,11 @@ get_current_version() {
     fi
 }
 
-# GitHub 최신 릴리즈 버전
+# EventToonSetup에서 최신 버전 조회
 get_latest_version() {
     curl -sSL --max-time "$TIMEOUT" \
-        "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-        | grep -oP '"tag_name":\s*"v?\K[0-9]+\.[0-9]+\.[0-9]+' \
+        "${SETUP_BASE}/VERSION" 2>/dev/null \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
         || echo ""
 }
 
@@ -51,7 +51,7 @@ version_gt() {
 # 바이너리 다운로드 + 교체
 do_update() {
     local version="$1"
-    local download_url="https://github.com/$REPO/releases/download/v${version}"
+    local download_url="${SETUP_BASE}/binaries"
     local tmp_dir
     tmp_dir=$(mktemp -d /tmp/eventtoon-update-XXXXXX)
 
@@ -127,7 +127,7 @@ CURRENT=$(get_current_version)
 log "현재 버전: v$CURRENT"
 
 # 네트워크 체크 (5초 대기)
-if ! curl -sSL --max-time 5 "https://api.github.com" >/dev/null 2>&1; then
+if ! curl -sSL --max-time 5 "${SETUP_BASE}/VERSION" >/dev/null 2>&1; then
     log "네트워크 불가 — 업데이트 스킵"
     exit 0
 fi
