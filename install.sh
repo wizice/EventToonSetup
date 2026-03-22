@@ -3,9 +3,10 @@
 # EventToon ARM64 설치 스크립트
 #
 # 사용법:
-#   curl -sSL https://raw.githubusercontent.com/wizice/EventToonSetup/main/install.sh | bash -s -- --token YOUR_TOKEN
-#   bash install.sh --token TOKEN                # 신규 설치
-#   bash install.sh --token TOKEN --update       # 바이너리만 업데이트
+#   curl -sSL https://raw.githubusercontent.com/wizice/EventToonSetup/main/install.sh | bash
+#   bash install.sh                              # 신규 설치
+#   bash install.sh --token TOKEN                # 토큰 포함 설치 (리포트에 토큰 첨부)
+#   bash install.sh --update                     # 바이너리만 업데이트
 #   bash install.sh --tunnel TUNNEL_TOKEN        # Cloudflare 터널 토큰 설정
 #   bash install.sh --status                     # 상태 확인
 #
@@ -74,11 +75,11 @@ step()  {
 check_prerequisites() {
     step "1/9 사전 확인"
     # root 확인
-    [ "$(id -u)" -eq 0 ] || error "root 권한이 필요합니다. sudo bash install.sh --token TOKEN"
+    [ "$(id -u)" -eq 0 ] || error "root 권한이 필요합니다. sudo bash install.sh"
 
-    # 토큰 확인
+    # 토큰 (선택사항 — 있으면 리포트에 포함)
     if [ -z "$DEPLOY_TOKEN" ]; then
-        error "슈퍼관리자 토큰이 필요합니다. --token TOKEN 옵션을 지정하세요."
+        warn "토큰 미지정 — 설치 리포트에 토큰 없이 hostname만 전송됩니다."
     fi
 
     # 아키텍처 확인
@@ -87,19 +88,8 @@ check_prerequisites() {
         error "ARM64 전용입니다. 현재: $ARCH"
     fi
 
-    # fit.wizice.com 토큰 검증
-    local auth_check
-    auth_check=$(curl -sSL --max-time 10 -o /dev/null -w "%{http_code}" \
-        "${REPORT_BASE}/verify?token=${DEPLOY_TOKEN}" 2>/dev/null || echo "000")
-    if [ "$auth_check" = "401" ] || [ "$auth_check" = "403" ]; then
-        error "인증 실패 — 슈퍼관리자 토큰을 확인하세요."
-    elif [ "$auth_check" = "000" ]; then
-        # 서버 연결 실패해도 GitHub에서 다운로드 가능하므로 경고만
-        warn "fit.wizice.com 연결 실패 — 설치 리포트가 전송되지 않을 수 있습니다."
-    fi
-
     # GitHub 연결 확인
-    if ! curl -sSL --max-time 5 "${SETUP_BASE}/install.sh" -o /dev/null 2>/dev/null; then
+    if ! curl -sSL --max-time 5 "${SETUP_BASE}/VERSION" -o /dev/null 2>/dev/null; then
         error "GitHub 연결 실패 — 인터넷 상태를 확인하세요."
     fi
 
@@ -196,9 +186,11 @@ install_scripts() {
         chmod +x "${SCRIPTS_DIR}/${script}" 2>/dev/null || true
     done
 
-    # 설치 리포트용 토큰 저장
-    echo "$DEPLOY_TOKEN" > "${SPOOL_DIR}/.deploy_token"
-    chmod 600 "${SPOOL_DIR}/.deploy_token"
+    # 설치 리포트용 토큰 저장 (있으면)
+    if [ -n "$DEPLOY_TOKEN" ]; then
+        echo "$DEPLOY_TOKEN" > "${SPOOL_DIR}/.deploy_token"
+        chmod 600 "${SPOOL_DIR}/.deploy_token"
+    fi
 
     log "스크립트 설치 완료"
 }
@@ -388,9 +380,9 @@ case "$MODE" in
 
     *)
         echo "사용법:"
-        echo "  curl -sSL https://raw.githubusercontent.com/wizice/EventToonSetup/main/install.sh | bash -s -- --token TOKEN"
+        echo "  curl -sSL https://raw.githubusercontent.com/wizice/EventToonSetup/main/install.sh | bash"
         echo ""
-        echo "  --token TOKEN    슈퍼관리자 인증 토큰 (필수)"
+        echo "  --token TOKEN    리포트용 토큰 (선택, 없으면 hostname만 전송)"
         echo "  --update         바이너리만 업데이트"
         echo "  --tunnel TOKEN   Cloudflare 터널 설정"
         echo "  --status         상태 확인"
