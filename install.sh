@@ -394,6 +394,7 @@ case "$MODE" in
         create_directories
         download_binaries
         install_scripts
+        install_services
         log "서비스 재시작..."
         systemctl restart eventtoon-display eventtoon-fetcher eventtoon 2>/dev/null || true
         log "업데이트 완료!"
